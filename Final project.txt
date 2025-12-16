@@ -1,0 +1,234 @@
+Server [localhost]:
+Database [postgres]:
+Port [5432]:
+Username [postgres]:
+Password for user postgres:
+
+psql (16.10)
+WARNING: Console code page (866) differs from Windows code page (1251)
+         8-bit characters might not work correctly. See psql reference
+         page "Notes for Windows users" for details.
+Type "help" for help.
+
+
+postgres=# BEGIN;
+BEGIN
+postgres=*# CREATE TABLE regions (
+postgres(*#     region_id SERIAL PRIMARY KEY,
+postgres(*#     name VARCHAR(100) NOT NULL UNIQUE,
+postgres(*#     description TEXT
+postgres(*# );
+CREATE TABLE
+postgres=*# CREATE TABLE monitoring_stations (
+postgres(*#     station_id SERIAL PRIMARY KEY,
+postgres(*#     station_name VARCHAR(50) NOT NULL,
+postgres(*#     region_id INTEGER REFERENCES regions(region_id)
+postgres(*# );
+CREATE TABLE
+postgres=*# CREATE TABLE cities (
+postgres(*#     city_id SERIAL PRIMARY KEY,
+postgres(*#     name VARCHAR(50) NOT NULL,
+postgres(*#     population INTEGER,
+postgres(*#     region_id INTEGER REFERENCES regions(region_id)
+postgres(*# );
+CREATE TABLE
+postgres=*# CREATE TABLE pollutants (
+postgres(*#     pollutant_id SERIAL PRIMARY KEY,
+postgres(*#     code VARCHAR(20) NOT NULL UNIQUE,
+postgres(*#     title VARCHAR(100) NOT NULL,
+postgres(*#     safe_limit NUMERIC(6,2) NOT NULL
+postgres(*# );
+CREATE TABLE
+postgres=*# CREATE TABLE monitoring_periods (
+postgres(*#     period_id SERIAL PRIMARY KEY,
+postgres(*#     pollutant_id INTEGER NOT NULL REFERENCES pollutants(pollutant_id) ON DELETE CASCADE,
+postgres(*#     station_id INTEGER REFERENCES monitoring_stations(station_id),
+postgres(*#     season VARCHAR(10) NOT NULL,
+postgres(*#     year SMALLINT NOT NULL,
+postgres(*#     CONSTRAINT uniq_period UNIQUE(pollutant_id, season, year)
+postgres(*# );
+CREATE TABLE
+postgres=*# CREATE TABLE city_measurements (
+postgres(*#     measurement_id SERIAL PRIMARY KEY,
+postgres(*#     city_id INTEGER NOT NULL REFERENCES cities(city_id) ON DELETE CASCADE,
+postgres(*#     period_id INTEGER NOT NULL REFERENCES monitoring_periods(period_id) ON DELETE CASCADE,
+postgres(*#     measured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+postgres(*#     status VARCHAR(20) DEFAULT 'measured',
+postgres(*#     CONSTRAINT uniq_city_measure UNIQUE(city_id, period_id)
+postgres(*# );
+CREATE TABLE
+postgres=*# CREATE TABLE pollutant_weights (
+postgres(*#     weight_id SERIAL PRIMARY KEY,
+postgres(*#     name VARCHAR(50) NOT NULL UNIQUE,
+postgres(*#     weight NUMERIC(5,4) NOT NULL CHECK(weight >= 0 AND weight <= 1)
+postgres(*# );
+CREATE TABLE
+postgres=*# CREATE TABLE measurements (
+postgres(*#     value_id SERIAL PRIMARY KEY,
+postgres(*#     measurement_id INTEGER NOT NULL REFERENCES city_measurements(measurement_id) ON DELETE CASCADE,
+postgres(*#     weight_id INTEGER NOT NULL REFERENCES pollutant_weights(weight_id),
+postgres(*#     value NUMERIC(6,2) CHECK(value >= 0),
+postgres(*#     recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+postgres(*# );
+CREATE TABLE
+postgres=*# COMMIT;
+COMMIT
+postgres=# BEGIN;
+BEGIN
+postgres=*# INSERT INTO regions (name, description) VALUES
+postgres-*# ('Chuy', 'Chuy region'),
+postgres-*# ('Osh', 'Osh region'),
+postgres-*# ('Issyk-Kul', 'Issyk-Kul region');
+INSERT 0 3
+postgres=*# INSERT INTO monitoring_stations (station_name, region_id) VALUES
+postgres-*# ('Bishkek Station', 1),
+postgres-*# ('Osh Station', 2),
+postgres-*# ('Karakol Station', 3);
+INSERT 0 3
+postgres=*# INSERT INTO cities (name, population, region_id) VALUES
+postgres-*# ('Bishkek', 1100000, 1),
+postgres-*# ('Tokmok', 55000, 1),
+postgres-*# ('Osh', 300000, 2),
+postgres-*# ('Karakol', 85000, 3),
+postgres-*# ('Cholpon-Ata', 14000, 3);
+INSERT 0 5
+postgres=*# INSERT INTO pollutants (code, title, safe_limit) VALUES
+postgres-*# ('PM25', 'PM2.5', 25),
+postgres-*# ('PM10', 'PM10', 50),
+postgres-*# ('NO2', 'Nitrogen Dioxide', 40);
+INSERT 0 3
+postgres=*# INSERT INTO pollutant_weights (name, weight) VALUES
+postgres-*# ('Winter impact', 0.40),
+postgres-*# ('Traffic impact', 0.35),
+postgres-*# ('Industrial impact', 0.25);
+INSERT 0 3
+postgres=*# INSERT INTO monitoring_periods (pollutant_id, station_id, season, year) VALUES
+postgres-*# (1,1,'Winter',2025),
+postgres-*# (2,1,'Winter',2025),
+postgres-*# (3,1,'Winter',2025),
+postgres-*# (1,2,'Winter',2025);
+INSERT 0 4
+postgres=*# COMMIT;
+COMMIT
+postgres=# BEGIN;
+BEGIN
+postgres=*# INSERT INTO city_measurements (city_id, period_id) VALUES
+postgres-*# (1,1),
+postgres-*# (2,1),
+postgres-*# (3,1),
+postgres-*# (4,2),
+postgres-*# (5,2),
+postgres-*# (3,4);
+INSERT 0 6
+postgres=*# INSERT INTO measurements (measurement_id, weight_id, value) VALUES
+postgres-*# (1,1,60),(1,2,70),(1,3,55),
+postgres-*# (2,1,45),(2,2,50),(2,3,48),
+postgres-*# (3,1,72),(3,2,80),(3,3,75),
+postgres-*# (4,1,30),(4,2,35),(4,3,28),
+postgres-*# (5,1,25),(5,2,30),(5,3,22),
+postgres-*# (6,1,55),(6,2,60),(6,3,58);
+INSERT 0 18
+postgres=*# COMMIT;
+COMMIT
+postgres=# CREATE OR REPLACE VIEW measurement_pollution_scores AS
+postgres-# SELECT
+postgres-#     cm.measurement_id,
+postgres-#     cm.city_id,
+postgres-#     cm.period_id,
+postgres-#     SUM(m.value * pw.weight) AS pollution_score
+postgres-# FROM city_measurements cm
+postgres-# JOIN measurements m ON m.measurement_id = cm.measurement_id
+postgres-# JOIN pollutant_weights pw ON pw.weight_id = m.weight_id
+postgres-# GROUP BY cm.measurement_id, cm.city_id, cm.period_id;
+CREATE VIEW
+postgres=# CREATE OR REPLACE VIEW city_season_avg AS
+postgres-# SELECT
+postgres-#     c.city_id,
+postgres-#     c.name,
+postgres-#     mp.season,
+postgres-#     mp.year,
+postgres-#     ROUND(AVG(mps.pollution_score),2) AS avg_score
+postgres-# FROM cities c
+postgres-# JOIN city_measurements cm ON cm.city_id = c.city_id
+postgres-# JOIN monitoring_periods mp ON mp.period_id = cm.period_id
+postgres-# JOIN measurement_pollution_scores mps ON mps.measurement_id = cm.measurement_id
+postgres-# GROUP BY c.city_id, c.name, mp.season, mp.year;
+CREATE VIEW
+postgres=#
+postgres=# CREATE OR REPLACE VIEW city_season_rank AS
+postgres-# SELECT
+postgres-#     city_id,
+postgres-#     name,
+postgres-#     season,
+postgres-#     year,
+postgres-#     avg_score,
+postgres-#     RANK() OVER (PARTITION BY season, year ORDER BY avg_score DESC) AS season_rank
+postgres-# FROM city_season_avg;
+CREATE VIEW
+postgres=# SELECT
+postgres-#     c.name,
+postgres-#     ROUND(AVG(mps.pollution_score),2) AS avg_score
+postgres-# FROM cities c
+postgres-# JOIN city_measurements cm ON cm.city_id = c.city_id
+postgres-# JOIN measurement_pollution_scores mps ON mps.measurement_id = cm.measurement_id
+postgres-# GROUP BY c.name
+postgres-# ORDER BY avg_score DESC;
+     name    | avg_score
+--------------+-----------
+ Bishkek      |     72.25
+ Osh          |     62.75
+ Tokmok       |     47.75
+ Karakol      |     30.50
+ Cholpon-Ata  |     26.25
+
+
+postgres=# SELECT *
+postgres-# FROM city_season_rank
+postgres-# WHERE season='Winter' AND year=2025
+postgres-# ORDER BY season_rank;
+ city_id |     name     | season | year | avg_score | season_rank
+---------+-------------+--------+------+-----------+-------------
+       3 | Bishkek     | Winter | 2025 |     72.25 |            1
+       1 | Osh         | Winter | 2025 |     62.75 |            2
+       2 | Tokmok      | Winter | 2025 |     47.75 |            3
+       4 | Karakol     | Winter | 2025 |     30.50 |            4
+       5 | Cholpon-Ata | Winter | 2025 |     26.25 |            5
+
+
+postgres=# SELECT
+postgres-#     mp.period_id,
+postgres-#     p.title,
+postgres-#     COUNT(mps.measurement_id) AS cities_count,
+postgres-#     ROUND(AVG(mps.pollution_score),2) AS avg_score,
+postgres-#     ROUND(MIN(mps.pollution_score),2) AS min_score,
+postgres-#     ROUND(MAX(mps.pollution_score),2) AS max_score
+postgres-# FROM monitoring_periods mp
+postgres-# JOIN pollutants p ON p.pollutant_id = mp.pollutant_id
+postgres-# JOIN measurement_pollution_scores mps ON mps.period_id = mp.period_id
+postgres-# WHERE mp.period_id = 1
+postgres-# GROUP BY mp.period_id, p.title;
+ period_id | title | cities_count | avg_score | min_score | max_score
+-----------+-------+--------------+-----------+-----------+-----------
+         1 | PM2.5 |            3 |     60.92 |     47.75 |     77.00
+
+
+postgres=# SELECT
+postgres-#     ms.station_name,
+postgres-#     p.title,
+postgres-#     mp.season,
+postgres-#     mp.year,
+postgres-#     COUNT(cm.measurement_id) AS cities_count
+postgres-# FROM monitoring_stations ms
+postgres-# JOIN monitoring_periods mp ON mp.station_id = ms.station_id
+postgres-# JOIN pollutants p ON p.pollutant_id = mp.pollutant_id
+postgres-# LEFT JOIN city_measurements cm ON cm.period_id = mp.period_id
+postgres-# WHERE ms.station_name='Bishkek Station'
+postgres-# GROUP BY ms.station_name, p.title, mp.season, mp.year;
+  station_name   |        title        | season | year | cities_count
+-----------------+----------------------+--------+------+--------------
+ Bishkek Station | PM10                 | Winter | 2025 |            2
+ Bishkek Station | PM2.5                | Winter | 2025 |            3
+ Bishkek Station | Nitrogen Dioxide | Winter | 2025 |            0
+
+
+postgres=#
